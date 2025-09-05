@@ -664,7 +664,7 @@
     </style>
 </head>
 <body>
-    <div class="sync-indicator online" id="sync-indicator"></div>
+    <div class="sync-indicator offline" id="sync-indicator"></div>
     
     <div class="container">
         <div class="header">
@@ -821,7 +821,7 @@
                 <button class="export-btn excel-btn" onclick="exportToExcel()">导出Excel</button>
                 <button class="export-btn backup-btn" onclick="backupData()">备份数据</button>
                 <button class="export-btn import-btn" onclick="importData()">导入数据</button>
-                <button class="export-btn sync-btn" onclick="showSyncCode()">同步设置</button>
+                <button class="export-btn sync-btn" onclick="showSyncCode()">GitHub同步</button>
             </div>
         </div>
     </div>
@@ -917,337 +917,324 @@
         let currentFilter = { furniture: 'all', renovation: 'all', materials: 'all' };
         let editingItem = null;
 
-// 改进的同步管理器，增加调试功能
-class ImprovedSyncManager {
-    constructor() {
-        this.roomId = this.getRoomId();
-        this.isConnected = false;
-        this.isSyncing = false;
-        this.pollInterval = null;
-        this.serverUrl = 'https://api.jsonbin.io/v3/b/';
-        this.binId = localStorage.getItem('binId') || null;
-        this.apiKey = localStorage.getItem('jsonbin_api_key') || null;
-        this.lastSyncTime = 0;
-        this.debugMode = true; // 开启调试模式
-        this.init();
-    }
-
-    log(message, type = 'info') {
-        if (this.debugMode) {
-            console.log(`[Sync ${type.toUpperCase()}] ${message}`);
-        }
-    }
-
-    getRoomId() {
-        let roomId = localStorage.getItem('renovationRoomId');
-        if (!roomId) {
-            roomId = 'room_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('renovationRoomId', roomId);
-            this.log(`Created new room ID: ${roomId}`);
-        } else {
-            this.log(`Using existing room ID: ${roomId}`);
-        }
-        return roomId;
-    }
-
-    async init() {
-        this.updateSyncIndicator('offline');
-        this.showStatus('初始化同步服务...');
-        
-        if (!this.binId || !this.apiKey) {
-            this.showStatus('需要配置同步服务', 'warning');
-            this.log('Missing API key or Bin ID');
-            return;
-        }
-
-        this.log(`Initializing with Bin ID: ${this.binId}`);
-        
-        try {
-            await this.testConnection();
-            this.startPolling();
-            this.showStatus('同步服务已连接');
-            this.updateSyncIndicator('online');
-            this.log('Sync service initialized successfully');
-        } catch (error) {
-            this.log(`Initialization failed: ${error.message}`, 'error');
-            this.showStatus('同步服务连接失败', 'error');
-            this.updateSyncIndicator('offline');
-        }
-
-        // 监听网络状态
-        window.addEventListener('online', () => this.handleOnline());
-        window.addEventListener('offline', () => this.handleOffline());
-    }
-
-    async testConnection() {
-        this.log('Testing connection...');
-        
-        const response = await fetch(this.serverUrl + this.binId, {
-            headers: {
-                'X-Master-Key': this.apiKey
+        // GitHub Gist 同步管理器
+        class GitHubGistSyncManager {
+            constructor() {
+                this.roomId = this.getRoomId();
+                this.gistId = localStorage.getItem('gistId') || null;
+                this.githubToken = localStorage.getItem('github_token') || null;
+                this.fileName = 'renovation-data.json';
+                this.pollInterval = null;
+                this.isSyncing = false;
+                this.lastSyncTime = parseInt(localStorage.getItem('lastSyncTime') || '0');
+                this.debugMode = true;
+                this.init();
             }
-        });
 
-        this.log(`Connection test response: ${response.status}`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        this.log('Connection test successful, data received');
-        return data;
-    }
-
-    startPolling() {
-        if (this.pollInterval) {
-            clearInterval(this.pollInterval);
-        }
-
-        this.log('Starting polling every 5 seconds');
-        
-        this.pollInterval = setInterval(async () => {
-            if (navigator.onLine && !this.isSyncing) {
-                await this.checkForUpdates();
-            }
-        }, 5000); // 改为5秒检查一次，更频繁
-
-        // 立即检查一次
-        setTimeout(() => this.checkForUpdates(), 1000);
-    }
-
-    async checkForUpdates() {
-        if (!this.apiKey || !this.binId || this.isSyncing) return;
-
-        try {
-            this.log('Checking for updates...');
-            this.updateSyncIndicator('syncing');
-            
-            const response = await fetch(this.serverUrl + this.binId, {
-                headers: {
-                    'X-Master-Key': this.apiKey
+            log(message, type = 'info') {
+                if (this.debugMode) {
+                    console.log(`[GitHubSync ${type.toUpperCase()}] ${message}`);
                 }
-            });
+            }
 
-            if (response.ok) {
-                const result = await response.json();
-                const remoteData = result.record;
-                
-                this.log(`Remote data timestamp: ${remoteData.timestamp}, Local: ${this.lastSyncTime}`);
-                
-                if (remoteData && remoteData.roomId === this.roomId) {
-                    if (parseInt(remoteData.timestamp) > this.lastSyncTime) {
-                        this.log('Remote data is newer, merging...');
-                        this.mergeData(remoteData.data);
-                        this.lastSyncTime = parseInt(remoteData.timestamp);
-                        localStorage.setItem('lastSyncTime', this.lastSyncTime.toString());
-                        this.showStatus('数据已从云端更新');
-                    } else {
-                        this.log('Local data is up to date');
-                    }
+            getRoomId() {
+                let roomId = localStorage.getItem('renovationRoomId');
+                if (!roomId) {
+                    roomId = 'room_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+                    localStorage.setItem('renovationRoomId', roomId);
+                    this.log(`Created new room ID: ${roomId}`);
                 } else {
-                    this.log('Room ID mismatch or invalid data structure');
+                    this.log(`Using existing room ID: ${roomId}`);
                 }
-            } else {
-                this.log(`Failed to check updates: ${response.status}`, 'error');
+                return roomId;
             }
-            
-            this.updateSyncIndicator('online');
-        } catch (error) {
-            this.log(`Update check failed: ${error.message}`, 'error');
-            this.updateSyncIndicator('offline');
-        }
-    }
 
-    async uploadData() {
-        if (!navigator.onLine || !this.apiKey || !this.binId) {
-            this.log('Upload skipped: offline or not configured');
-            return;
-        }
-
-        if (this.isSyncing) {
-            this.log('Upload skipped: already syncing');
-            return;
-        }
-
-        try {
-            this.isSyncing = true;
-            this.updateSyncIndicator('syncing');
-            this.log('Uploading data...');
-
-            const timestamp = Date.now();
-            const uploadData = {
-                data: JSON.parse(JSON.stringify(data)), // 深拷贝
-                timestamp: timestamp.toString(),
-                roomId: this.roomId,
-                lastModified: new Date().toISOString()
-            };
-
-            this.log(`Uploading with timestamp: ${timestamp}`);
-
-            const response = await fetch(this.serverUrl + this.binId, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Master-Key': this.apiKey
-                },
-                body: JSON.stringify(uploadData)
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                this.lastSyncTime = timestamp;
-                localStorage.setItem('lastSyncTime', timestamp.toString());
-                this.log('Data uploaded successfully');
-                this.showStatus('数据已上传到云端');
-                this.updateSyncIndicator('online');
-            } else {
-                const errorText = await response.text();
-                this.log(`Upload failed: ${response.status} - ${errorText}`, 'error');
-                throw new Error(`HTTP ${response.status}`);
-            }
-        } catch (error) {
-            this.log(`Upload error: ${error.message}`, 'error');
-            this.showStatus('数据上传失败', 'error');
-            this.updateSyncIndicator('offline');
-        } finally {
-            this.isSyncing = false;
-        }
-    }
-
-    mergeData(remoteData) {
-        try {
-            this.log('Merging remote data...');
-            this.log('Remote data structure:', JSON.stringify(remoteData, null, 2));
-            
-            // 备份当前数据
-            const localBackup = JSON.parse(JSON.stringify(data));
-            
-            // 更新全局数据
-            data.furniture = remoteData.furniture || [];
-            data.renovation = remoteData.renovation || [];
-            data.materials = remoteData.materials || [];
-            
-            // 重新渲染界面
-            ['furniture', 'renovation', 'materials'].forEach(category => {
-                renderItems(category);
-            });
-            updateTotals();
-            
-            this.log('Data merged successfully');
-        } catch (error) {
-            this.log(`Data merge failed: ${error.message}`, 'error');
-            this.showStatus('数据同步异常', 'error');
-        }
-    }
-
-    async setupSync(apiKey) {
-        try {
-            this.log(`Setting up sync with API key: ${apiKey.substring(0, 10)}...`);
-            this.apiKey = apiKey;
-            localStorage.setItem('jsonbin_api_key', apiKey);
-            
-            // 创建新的bin
-            const initialData = {
-                data: JSON.parse(JSON.stringify(data)),
-                timestamp: Date.now().toString(),
-                roomId: this.roomId,
-                lastModified: new Date().toISOString()
-            };
-
-            this.log('Creating new bin...');
-            
-            const createResponse = await fetch('https://api.jsonbin.io/v3/b', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Master-Key': apiKey
-                },
-                body: JSON.stringify(initialData)
-            });
-
-            if (createResponse.ok) {
-                const result = await createResponse.json();
-                this.binId = result.metadata.id;
-                localStorage.setItem('binId', this.binId);
-                localStorage.setItem('lastSyncTime', initialData.timestamp);
-                this.lastSyncTime = parseInt(initialData.timestamp);
+            async init() {
+                this.updateSyncIndicator('offline');
                 
-                this.log(`Bin created successfully: ${this.binId}`);
-                
-                await this.init();
-                this.showStatus('同步功能配置成功！');
-                return true;
-            } else {
-                const errorText = await createResponse.text();
-                this.log(`Bin creation failed: ${createResponse.status} - ${errorText}`, 'error');
-                throw new Error(`创建存储失败: ${createResponse.status}`);
-            }
-        } catch (error) {
-            this.log(`Setup failed: ${error.message}`, 'error');
-            this.showStatus('同步配置失败：' + error.message, 'error');
-            return false;
-        }
-    }
-
-    // 其他方法保持不变...
-    updateSyncIndicator(status) {
-        const indicator = document.getElementById('sync-indicator');
-        if (indicator) {
-            indicator.className = `sync-indicator ${status}`;
-        }
-    }
-
-    showStatus(message, type = 'success') {
-        const statusEl = document.getElementById('sync-status');
-        if (statusEl) {
-            statusEl.textContent = message;
-            statusEl.className = `sync-status ${type}`;
-            setTimeout(() => {
-                if (statusEl.textContent === message) {
-                    statusEl.textContent = '';
-                    statusEl.className = 'sync-status';
+                if (!this.gistId || !this.githubToken) {
+                    this.showStatus('需要配置GitHub同步', 'warning');
+                    this.log('Missing GitHub token or Gist ID');
+                    return;
                 }
-            }, 5000);
+
+                this.log(`Initializing with Gist ID: ${this.gistId}`);
+
+                try {
+                    await this.testConnection();
+                    this.startPolling();
+                    this.showStatus('GitHub同步已连接');
+                    this.updateSyncIndicator('online');
+                    this.log('GitHub sync initialized successfully');
+                } catch (error) {
+                    this.log(`初始化失败: ${error.message}`, 'error');
+                    this.showStatus('同步连接失败', 'error');
+                    this.updateSyncIndicator('offline');
+                }
+            }
+
+            async testConnection() {
+                this.log('Testing GitHub connection...');
+                
+                const response = await fetch(`https://api.github.com/gists/${this.gistId}`, {
+                    headers: {
+                        'Authorization': `token ${this.githubToken}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                });
+
+                this.log(`GitHub connection test response: ${response.status}`);
+
+                if (!response.ok) {
+                    throw new Error(`GitHub API错误: ${response.status}: ${response.statusText}`);
+                }
+
+                const gist = await response.json();
+                this.log('GitHub connection test successful');
+                return gist;
+            }
+
+            startPolling() {
+                if (this.pollInterval) {
+                    clearInterval(this.pollInterval);
+                }
+
+                this.log('Starting polling every 15 seconds');
+
+                this.pollInterval = setInterval(async () => {
+                    if (navigator.onLine && !this.isSyncing) {
+                        await this.checkForUpdates();
+                    }
+                }, 15000); // 15秒检查一次
+
+                // 立即检查一次
+                setTimeout(() => this.checkForUpdates(), 1000);
+            }
+
+            async checkForUpdates() {
+                if (!this.githubToken || !this.gistId || this.isSyncing) return;
+
+                try {
+                    this.log('Checking for updates...');
+                    this.updateSyncIndicator('syncing');
+                    
+                    const response = await fetch(`https://api.github.com/gists/${this.gistId}`, {
+                        headers: {
+                            'Authorization': `token ${this.githubToken}`,
+                            'Accept': 'application/vnd.github.v3+json'
+                        }
+                    });
+
+                    if (response.ok) {
+                        const gist = await response.json();
+                        const fileContent = gist.files[this.fileName];
+                        
+                        if (fileContent) {
+                            const remoteData = JSON.parse(fileContent.content);
+                            
+                            this.log(`Remote data timestamp: ${remoteData.timestamp}, Local: ${this.lastSyncTime}`);
+                            
+                            if (remoteData.roomId === this.roomId) {
+                                const remoteTimestamp = parseInt(remoteData.timestamp);
+                                
+                                if (remoteTimestamp > this.lastSyncTime) {
+                                    this.log('Remote data is newer, merging...');
+                                    this.mergeData(remoteData.data);
+                                    this.lastSyncTime = remoteTimestamp;
+                                    localStorage.setItem('lastSyncTime', remoteTimestamp.toString());
+                                    this.showStatus('数据已从GitHub同步');
+                                } else {
+                                    this.log('Local data is up to date');
+                                }
+                            } else {
+                                this.log('Room ID mismatch or invalid data structure');
+                            }
+                        }
+                    } else {
+                        this.log(`Failed to check updates: ${response.status}`, 'error');
+                    }
+                    
+                    this.updateSyncIndicator('online');
+                } catch (error) {
+                    this.log(`Update check failed: ${error.message}`, 'error');
+                    this.updateSyncIndicator('offline');
+                }
+            }
+
+            async uploadData() {
+                if (!navigator.onLine || !this.githubToken || !this.gistId) {
+                    this.log('Upload skipped: offline or not configured');
+                    return;
+                }
+
+                if (this.isSyncing) {
+                    this.log('Upload skipped: already syncing');
+                    return;
+                }
+
+                try {
+                    this.isSyncing = true;
+                    this.updateSyncIndicator('syncing');
+                    this.log('Uploading data to GitHub...');
+
+                    const timestamp = Date.now();
+                    const uploadData = {
+                        data: JSON.parse(JSON.stringify(data)), // 深拷贝
+                        timestamp: timestamp,
+                        roomId: this.roomId,
+                        lastModified: new Date().toISOString()
+                    };
+
+                    this.log(`Uploading with timestamp: ${timestamp}`);
+
+                    const response = await fetch(`https://api.github.com/gists/${this.gistId}`, {
+                        method: 'PATCH',
+                        headers: {
+                            'Authorization': `token ${this.githubToken}`,
+                            'Accept': 'application/vnd.github.v3+json',
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            files: {
+                                [this.fileName]: {
+                                    content: JSON.stringify(uploadData, null, 2)
+                                }
+                            }
+                        })
+                    });
+
+                    if (response.ok) {
+                        this.lastSyncTime = timestamp;
+                        localStorage.setItem('lastSyncTime', timestamp.toString());
+                        this.log('Data uploaded successfully to GitHub');
+                        this.showStatus('数据已上传到GitHub');
+                        this.updateSyncIndicator('online');
+                    } else {
+                        const errorText = await response.text();
+                        this.log(`Upload failed: ${response.status} - ${errorText}`, 'error');
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    this.log(`Upload error: ${error.message}`, 'error');
+                    this.showStatus('数据上传失败', 'error');
+                    this.updateSyncIndicator('offline');
+                } finally {
+                    this.isSyncing = false;
+                }
+            }
+
+            async setupSync(githubToken) {
+                try {
+                    this.log(`Setting up GitHub sync with token: ${githubToken.substring(0, 10)}...`);
+                    this.githubToken = githubToken;
+                    localStorage.setItem('github_token', githubToken);
+
+                    // 创建新的Gist
+                    const initialData = {
+                        data: JSON.parse(JSON.stringify(data)),
+                        timestamp: Date.now(),
+                        roomId: this.roomId,
+                        lastModified: new Date().toISOString()
+                    };
+
+                    this.log('Creating new Gist...');
+
+                    const response = await fetch('https://api.github.com/gists', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `token ${githubToken}`,
+                            'Accept': 'application/vnd.github.v3+json',
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            description: '装修费用计算器数据同步',
+                            public: false,
+                            files: {
+                                [this.fileName]: {
+                                    content: JSON.stringify(initialData, null, 2)
+                                }
+                            }
+                        })
+                    });
+
+                    if (response.ok) {
+                        const gist = await response.json();
+                        this.gistId = gist.id;
+                        localStorage.setItem('gistId', this.gistId);
+                        localStorage.setItem('lastSyncTime', initialData.timestamp.toString());
+                        this.lastSyncTime = initialData.timestamp;
+                        
+                        this.log(`Gist created successfully: ${this.gistId}`);
+                        
+                        await this.init();
+                        this.showStatus('GitHub同步配置成功！');
+                        return { success: true, gistId: this.gistId };
+                    } else {
+                        const errorText = await response.text();
+                        this.log(`Gist creation failed: ${response.status} - ${errorText}`, 'error');
+                        throw new Error(`创建Gist失败: ${response.status}`);
+                    }
+                } catch (error) {
+                    this.log(`Setup failed: ${error.message}`, 'error');
+                    this.showStatus('GitHub同步配置失败：' + error.message, 'error');
+                    return { success: false, error: error.message };
+                }
+            }
+
+            mergeData(remoteData) {
+                try {
+                    this.log('Merging remote data...');
+                    
+                    // 更新全局数据
+                    data.furniture = remoteData.furniture || [];
+                    data.renovation = remoteData.renovation || [];
+                    data.materials = remoteData.materials || [];
+                    
+                    // 重新渲染界面
+                    ['furniture', 'renovation', 'materials'].forEach(category => {
+                        renderItems(category);
+                    });
+                    updateTotals();
+                    
+                    this.log('Data merged successfully');
+                } catch (error) {
+                    this.log(`Data merge failed: ${error.message}`, 'error');
+                    this.showStatus('数据同步异常', 'error');
+                }
+            }
+
+            updateSyncIndicator(status) {
+                const indicator = document.getElementById('sync-indicator');
+                if (indicator) {
+                    indicator.className = `sync-indicator ${status}`;
+                }
+            }
+
+            showStatus(message, type = 'success') {
+                const statusEl = document.getElementById('sync-status');
+                if (statusEl) {
+                    statusEl.textContent = message;
+                    statusEl.className = `sync-status ${type}`;
+                    setTimeout(() => {
+                        if (statusEl.textContent === message) {
+                            statusEl.textContent = '';
+                            statusEl.className = 'sync-status';
+                        }
+                    }, 5000);
+                }
+            }
+
+            getRoomCode() {
+                return this.roomId;
+            }
+
+            getGistUrl() {
+                return this.gistId ? `https://gist.github.com/${this.gistId}` : null;
+            }
         }
-    }
 
-    getRoomCode() {
-        return this.roomId;
-    }
-
-    // 添加强制同步方法
-    async forcSync() {
-        this.log('Force sync triggered');
-        this.lastSyncTime = 0; // 重置时间戳
-        localStorage.removeItem('lastSyncTime');
-        await this.checkForUpdates();
-    }
-
-    // 添加调试信息显示
-    getDebugInfo() {
-        return {
-            roomId: this.roomId,
-            binId: this.binId,
-            hasApiKey: !!this.apiKey,
-            lastSyncTime: this.lastSyncTime,
-            isConnected: this.isConnected,
-            isSyncing: this.isSyncing
-        };
-    }
-}
-
-
-        // 初始化同步管理器
-        const syncManager = new ImprovedSyncManager();
-
-        // 保存原始函数
-        const originalFunctions = {
-            addItem: null,
-            deleteItem: null,
-            saveEdit: null,
-            changeItemQuantity: null
-        };
+        // 初始化GitHub同步管理器
+        const syncManager = new GitHubGistSyncManager();
 
         function formatCurrency(amount) {
             return '¥' + amount.toLocaleString();
@@ -1517,24 +1504,25 @@ class ImprovedSyncManager {
             setTimeout(() => toast.classList.remove('show'), 3000);
         }
 
-        // 显示同步配置
+        // 显示GitHub同步配置
         function showSyncCode() {
             const modal = document.createElement('div');
             modal.className = 'modal show';
             modal.innerHTML = `
                 <div class="modal-content">
                     <div class="modal-header">
-                        <div class="modal-title">同步设置</div>
+                        <div class="modal-title">GitHub同步设置</div>
                         <button class="close-btn" onclick="this.parentElement.parentElement.parentElement.remove()">&times;</button>
                     </div>
                     <div class="modal-form">
                         <p style="margin-bottom: 15px; color: #666; font-size: 14px;">
-                            要启用多设备同步，需要配置JSONBin API。<br>
-                            1. 访问 <a href="https://jsonbin.io" target="_blank">JSONBin.io</a> 注册免费账户<br>
-                            2. 获取 API Key 并输入下方<br>
-                            3. 分享房间代码给家人实现数据同步
+                            要启用多设备同步，需要配置GitHub Personal Access Token。<br>
+                            1. 访问 <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings</a><br>
+                            2. 点击"Generate new token (classic)"<br>
+                            3. 勾选"gist"权限并生成token<br>
+                            4. 将token输入下方
                         </p>
-                        <input type="text" id="api-key-input" placeholder="请输入 JSONBin API Key" style="margin-bottom: 15px;">
+                        <input type="password" id="github-token-input" placeholder="请输入 GitHub Personal Access Token" style="margin-bottom: 15px;">
                         <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; margin: 15px 0;">
                             <p style="margin-bottom: 10px; font-weight: bold;">房间代码：</p>
                             <div style="font-family: monospace; font-size: 14px; word-break: break-all; background: white; padding: 10px; border-radius: 4px;">
@@ -1543,7 +1531,7 @@ class ImprovedSyncManager {
                         </div>
                         <div class="modal-buttons">
                             <button class="modal-btn secondary" onclick="this.closest('.modal').remove()">取消</button>
-                            <button class="modal-btn primary" onclick="setupSyncWithApi()">配置同步</button>
+                            <button class="modal-btn primary" onclick="setupGitHubSync()">配置同步</button>
                             <button class="modal-btn primary" onclick="copyRoomCode('${syncManager.getRoomCode()}')">复制房间代码</button>
                         </div>
                     </div>
@@ -1559,16 +1547,19 @@ class ImprovedSyncManager {
             });
         }
 
-        function setupSyncWithApi() {
-            const apiKey = document.getElementById('api-key-input').value.trim();
-            if (!apiKey) {
-                showToast('请输入 API Key');
+        function setupGitHubSync() {
+            const githubToken = document.getElementById('github-token-input').value.trim();
+            if (!githubToken) {
+                showToast('请输入 GitHub Token');
                 return;
             }
 
-            syncManager.setupSync(apiKey).then(success => {
-                if (success) {
+            syncManager.setupSync(githubToken).then(result => {
+                if (result.success) {
                     document.querySelector('.modal.show').remove();
+                    showToast('GitHub同步配置成功！');
+                } else {
+                    showToast('配置失败：' + result.error);
                 }
             });
         }
@@ -1637,14 +1628,9 @@ class ImprovedSyncManager {
                 const { jsPDF } = window.jsPDF;
                 const doc = new jsPDF();
                 
-                // 设置字体（支持中文）
                 doc.setFont('helvetica');
-                
-                // 标题
                 doc.setFontSize(20);
                 doc.text('装修费用汇总', 105, 20, { align: 'center' });
-                
-                // 生成日期
                 doc.setFontSize(10);
                 doc.text(`生成日期: ${new Date().toLocaleDateString()}`, 105, 30, { align: 'center' });
                 
@@ -1656,13 +1642,11 @@ class ImprovedSyncManager {
                 };
                 
                 Object.keys(categories).forEach(category => {
-                    // 类别标题
                     doc.setFontSize(14);
                     doc.setFont('helvetica', 'bold');
                     doc.text(categories[category], 20, yPosition);
                     yPosition += 10;
                     
-                    // 项目列表
                     doc.setFontSize(10);
                     doc.setFont('helvetica', 'normal');
                     
@@ -1678,7 +1662,6 @@ class ImprovedSyncManager {
                         yPosition += 6;
                     });
                     
-                    // 小计
                     doc.setFont('helvetica', 'bold');
                     const subtotal = calculateTotal(category);
                     doc.text(`小计: ¥${subtotal.toLocaleString()}`, 25, yPosition);
@@ -1686,7 +1669,6 @@ class ImprovedSyncManager {
                     doc.setFont('helvetica', 'normal');
                 });
                 
-                // 总计
                 if (yPosition > 260) {
                     doc.addPage();
                     yPosition = 20;
@@ -1696,7 +1678,6 @@ class ImprovedSyncManager {
                 const grandTotal = calculateGrandTotal();
                 doc.text(`总计: ¥${grandTotal.toLocaleString()}`, 105, yPosition, { align: 'center' });
                 
-                // 保存PDF
                 const fileName = `装修费用汇总_${new Date().toISOString().split('T')[0]}.pdf`;
                 doc.save(fileName);
                 showToast('PDF导出成功！');
@@ -1708,14 +1689,12 @@ class ImprovedSyncManager {
         }
 
         function exportToExcel() {
-            // 检查XLSX库是否已加载
             if (typeof XLSX === 'undefined') {
                 showToast('Excel library not loaded, please refresh and try again');
                 return;
             }
 
             try {
-                // 创建工作簿
                 const wb = XLSX.utils.book_new();
                 
                 const categories = {
@@ -1724,7 +1703,6 @@ class ImprovedSyncManager {
                     materials: 'Materials & Labor'
                 };
                 
-                // 汇总数据
                 const summaryData = [
                     ['Renovation Cost Summary'],
                     ['Generated Date', new Date().toLocaleDateString()],
@@ -1748,21 +1726,13 @@ class ImprovedSyncManager {
                 const grandTotal = calculateGrandTotal();
                 summaryData.push(['', 'Grand Total', '', '', grandTotal]);
                 
-                // 创建汇总工作表
                 const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
-                
-                // 设置列宽
                 summaryWs['!cols'] = [
-                    { wch: 15 }, // Category
-                    { wch: 30 }, // Item Name
-                    { wch: 12 }, // Unit Price
-                    { wch: 10 }, // Quantity
-                    { wch: 15 }  // Subtotal
+                    { wch: 15 }, { wch: 30 }, { wch: 12 }, { wch: 10 }, { wch: 15 }
                 ];
                 
                 XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
                 
-                // 为每个类别创建单独的工作表
                 Object.keys(categories).forEach(category => {
                     const categoryData = [
                         [categories[category]],
@@ -1780,19 +1750,13 @@ class ImprovedSyncManager {
                     categoryData.push(['Total', '', '', subtotal]);
                     
                     const ws = XLSX.utils.aoa_to_sheet(categoryData);
-                    
-                    // 设置列宽
                     ws['!cols'] = [
-                        { wch: 30 }, // Item Name
-                        { wch: 12 }, // Unit Price
-                        { wch: 10 }, // Quantity
-                        { wch: 15 }  // Subtotal
+                        { wch: 30 }, { wch: 12 }, { wch: 10 }, { wch: 15 }
                     ];
                     
-                    XLSX.utils.book_append_sheet(wb, ws, categories[category].substring(0, 30)); // 限制工作表名长度
+                    XLSX.utils.book_append_sheet(wb, ws, categories[category].substring(0, 30));
                 });
                 
-                // 保存Excel文件
                 const fileName = `renovation_cost_${new Date().toISOString().split('T')[0]}.xlsx`;
                 XLSX.writeFile(wb, fileName);
                 showToast('Excel exported successfully!');
@@ -1807,7 +1771,7 @@ class ImprovedSyncManager {
             const backupData = {
                 data: data,
                 timestamp: new Date().toISOString(),
-                version: '2.0'
+                version: '3.0'
             };
             
             const dataStr = JSON.stringify(backupData, null, 2);
@@ -1837,7 +1801,6 @@ class ImprovedSyncManager {
                     if (importedData.data) {
                         data = importedData.data;
                         
-                        // 确保所有项目都有数量属性
                         Object.keys(data).forEach(category => {
                             data[category].forEach(item => {
                                 if (!item.quantity) item.quantity = 1;
@@ -1864,7 +1827,6 @@ class ImprovedSyncManager {
 
         // 初始化
         ['furniture', 'renovation', 'materials'].forEach(category => {
-            // 确保所有现有项目都有数量属性
             data[category].forEach(item => {
                 if (!item.quantity) item.quantity = 1;
             });
