@@ -1862,3 +1862,322 @@
     </script>
 </body>
 </html>
+// 改进的同步管理器，增加调试功能
+class ImprovedSyncManager {
+    constructor() {
+        this.roomId = this.getRoomId();
+        this.isConnected = false;
+        this.isSyncing = false;
+        this.pollInterval = null;
+        this.serverUrl = 'https://api.jsonbin.io/v3/b/';
+        this.binId = localStorage.getItem('binId') || null;
+        this.apiKey = localStorage.getItem('jsonbin_api_key') || null;
+        this.lastSyncTime = 0;
+        this.debugMode = true; // 开启调试模式
+        this.init();
+    }
+
+    log(message, type = 'info') {
+        if (this.debugMode) {
+            console.log(`[Sync ${type.toUpperCase()}] ${message}`);
+        }
+    }
+
+    getRoomId() {
+        let roomId = localStorage.getItem('renovationRoomId');
+        if (!roomId) {
+            roomId = 'room_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('renovationRoomId', roomId);
+            this.log(`Created new room ID: ${roomId}`);
+        } else {
+            this.log(`Using existing room ID: ${roomId}`);
+        }
+        return roomId;
+    }
+
+    async init() {
+        this.updateSyncIndicator('offline');
+        this.showStatus('初始化同步服务...');
+        
+        if (!this.binId || !this.apiKey) {
+            this.showStatus('需要配置同步服务', 'warning');
+            this.log('Missing API key or Bin ID');
+            return;
+        }
+
+        this.log(`Initializing with Bin ID: ${this.binId}`);
+        
+        try {
+            await this.testConnection();
+            this.startPolling();
+            this.showStatus('同步服务已连接');
+            this.updateSyncIndicator('online');
+            this.log('Sync service initialized successfully');
+        } catch (error) {
+            this.log(`Initialization failed: ${error.message}`, 'error');
+            this.showStatus('同步服务连接失败', 'error');
+            this.updateSyncIndicator('offline');
+        }
+
+        // 监听网络状态
+        window.addEventListener('online', () => this.handleOnline());
+        window.addEventListener('offline', () => this.handleOffline());
+    }
+
+    async testConnection() {
+        this.log('Testing connection...');
+        
+        const response = await fetch(this.serverUrl + this.binId, {
+            headers: {
+                'X-Master-Key': this.apiKey
+            }
+        });
+
+        this.log(`Connection test response: ${response.status}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        this.log('Connection test successful, data received');
+        return data;
+    }
+
+    startPolling() {
+        if (this.pollInterval) {
+            clearInterval(this.pollInterval);
+        }
+
+        this.log('Starting polling every 5 seconds');
+        
+        this.pollInterval = setInterval(async () => {
+            if (navigator.onLine && !this.isSyncing) {
+                await this.checkForUpdates();
+            }
+        }, 5000); // 改为5秒检查一次，更频繁
+
+        // 立即检查一次
+        setTimeout(() => this.checkForUpdates(), 1000);
+    }
+
+    async checkForUpdates() {
+        if (!this.apiKey || !this.binId || this.isSyncing) return;
+
+        try {
+            this.log('Checking for updates...');
+            this.updateSyncIndicator('syncing');
+            
+            const response = await fetch(this.serverUrl + this.binId, {
+                headers: {
+                    'X-Master-Key': this.apiKey
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                const remoteData = result.record;
+                
+                this.log(`Remote data timestamp: ${remoteData.timestamp}, Local: ${this.lastSyncTime}`);
+                
+                if (remoteData && remoteData.roomId === this.roomId) {
+                    if (parseInt(remoteData.timestamp) > this.lastSyncTime) {
+                        this.log('Remote data is newer, merging...');
+                        this.mergeData(remoteData.data);
+                        this.lastSyncTime = parseInt(remoteData.timestamp);
+                        localStorage.setItem('lastSyncTime', this.lastSyncTime.toString());
+                        this.showStatus('数据已从云端更新');
+                    } else {
+                        this.log('Local data is up to date');
+                    }
+                } else {
+                    this.log('Room ID mismatch or invalid data structure');
+                }
+            } else {
+                this.log(`Failed to check updates: ${response.status}`, 'error');
+            }
+            
+            this.updateSyncIndicator('online');
+        } catch (error) {
+            this.log(`Update check failed: ${error.message}`, 'error');
+            this.updateSyncIndicator('offline');
+        }
+    }
+
+    async uploadData() {
+        if (!navigator.onLine || !this.apiKey || !this.binId) {
+            this.log('Upload skipped: offline or not configured');
+            return;
+        }
+
+        if (this.isSyncing) {
+            this.log('Upload skipped: already syncing');
+            return;
+        }
+
+        try {
+            this.isSyncing = true;
+            this.updateSyncIndicator('syncing');
+            this.log('Uploading data...');
+
+            const timestamp = Date.now();
+            const uploadData = {
+                data: JSON.parse(JSON.stringify(data)), // 深拷贝
+                timestamp: timestamp.toString(),
+                roomId: this.roomId,
+                lastModified: new Date().toISOString()
+            };
+
+            this.log(`Uploading with timestamp: ${timestamp}`);
+
+            const response = await fetch(this.serverUrl + this.binId, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Master-Key': this.apiKey
+                },
+                body: JSON.stringify(uploadData)
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.lastSyncTime = timestamp;
+                localStorage.setItem('lastSyncTime', timestamp.toString());
+                this.log('Data uploaded successfully');
+                this.showStatus('数据已上传到云端');
+                this.updateSyncIndicator('online');
+            } else {
+                const errorText = await response.text();
+                this.log(`Upload failed: ${response.status} - ${errorText}`, 'error');
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (error) {
+            this.log(`Upload error: ${error.message}`, 'error');
+            this.showStatus('数据上传失败', 'error');
+            this.updateSyncIndicator('offline');
+        } finally {
+            this.isSyncing = false;
+        }
+    }
+
+    mergeData(remoteData) {
+        try {
+            this.log('Merging remote data...');
+            this.log('Remote data structure:', JSON.stringify(remoteData, null, 2));
+            
+            // 备份当前数据
+            const localBackup = JSON.parse(JSON.stringify(data));
+            
+            // 更新全局数据
+            data.furniture = remoteData.furniture || [];
+            data.renovation = remoteData.renovation || [];
+            data.materials = remoteData.materials || [];
+            
+            // 重新渲染界面
+            ['furniture', 'renovation', 'materials'].forEach(category => {
+                renderItems(category);
+            });
+            updateTotals();
+            
+            this.log('Data merged successfully');
+        } catch (error) {
+            this.log(`Data merge failed: ${error.message}`, 'error');
+            this.showStatus('数据同步异常', 'error');
+        }
+    }
+
+    async setupSync(apiKey) {
+        try {
+            this.log(`Setting up sync with API key: ${apiKey.substring(0, 10)}...`);
+            this.apiKey = apiKey;
+            localStorage.setItem('jsonbin_api_key', apiKey);
+            
+            // 创建新的bin
+            const initialData = {
+                data: JSON.parse(JSON.stringify(data)),
+                timestamp: Date.now().toString(),
+                roomId: this.roomId,
+                lastModified: new Date().toISOString()
+            };
+
+            this.log('Creating new bin...');
+            
+            const createResponse = await fetch('https://api.jsonbin.io/v3/b', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Master-Key': apiKey
+                },
+                body: JSON.stringify(initialData)
+            });
+
+            if (createResponse.ok) {
+                const result = await createResponse.json();
+                this.binId = result.metadata.id;
+                localStorage.setItem('binId', this.binId);
+                localStorage.setItem('lastSyncTime', initialData.timestamp);
+                this.lastSyncTime = parseInt(initialData.timestamp);
+                
+                this.log(`Bin created successfully: ${this.binId}`);
+                
+                await this.init();
+                this.showStatus('同步功能配置成功！');
+                return true;
+            } else {
+                const errorText = await createResponse.text();
+                this.log(`Bin creation failed: ${createResponse.status} - ${errorText}`, 'error');
+                throw new Error(`创建存储失败: ${createResponse.status}`);
+            }
+        } catch (error) {
+            this.log(`Setup failed: ${error.message}`, 'error');
+            this.showStatus('同步配置失败：' + error.message, 'error');
+            return false;
+        }
+    }
+
+    // 其他方法保持不变...
+    updateSyncIndicator(status) {
+        const indicator = document.getElementById('sync-indicator');
+        if (indicator) {
+            indicator.className = `sync-indicator ${status}`;
+        }
+    }
+
+    showStatus(message, type = 'success') {
+        const statusEl = document.getElementById('sync-status');
+        if (statusEl) {
+            statusEl.textContent = message;
+            statusEl.className = `sync-status ${type}`;
+            setTimeout(() => {
+                if (statusEl.textContent === message) {
+                    statusEl.textContent = '';
+                    statusEl.className = 'sync-status';
+                }
+            }, 5000);
+        }
+    }
+
+    getRoomCode() {
+        return this.roomId;
+    }
+
+    // 添加强制同步方法
+    async forcSync() {
+        this.log('Force sync triggered');
+        this.lastSyncTime = 0; // 重置时间戳
+        localStorage.removeItem('lastSyncTime');
+        await this.checkForUpdates();
+    }
+
+    // 添加调试信息显示
+    getDebugInfo() {
+        return {
+            roomId: this.roomId,
+            binId: this.binId,
+            hasApiKey: !!this.apiKey,
+            lastSyncTime: this.lastSyncTime,
+            isConnected: this.isConnected,
+            isSyncing: this.isSyncing
+        };
+    }
+}
