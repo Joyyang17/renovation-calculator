@@ -49,6 +49,63 @@
             margin: 10px 0;
         }
         
+        .sync-status {
+            font-size: 12px;
+            margin-top: 5px;
+            padding: 5px 10px;
+            border-radius: 15px;
+            transition: all 0.3s;
+            min-height: 20px;
+        }
+
+        .sync-status.success {
+            background: rgba(72, 187, 120, 0.2);
+            color: #38a169;
+            border: 1px solid rgba(72, 187, 120, 0.3);
+        }
+
+        .sync-status.error {
+            background: rgba(229, 62, 62, 0.2);
+            color: #e53e3e;
+            border: 1px solid rgba(229, 62, 62, 0.3);
+        }
+
+        .sync-status.warning {
+            background: rgba(237, 137, 54, 0.2);
+            color: #d69e2e;
+            border: 1px solid rgba(237, 137, 54, 0.3);
+        }
+
+        .sync-indicator {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            z-index: 1001;
+        }
+
+        .sync-indicator.online {
+            background: #48bb78;
+            box-shadow: 0 0 10px rgba(72, 187, 120, 0.5);
+        }
+
+        .sync-indicator.offline {
+            background: #e53e3e;
+            box-shadow: 0 0 10px rgba(229, 62, 62, 0.5);
+        }
+
+        .sync-indicator.syncing {
+            background: #3182ce;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
         .category-tabs {
             display: flex;
             background: #f8f9fa;
@@ -427,8 +484,8 @@
             background: linear-gradient(135deg, #38a169, #68d391);
         }
         
-        .clear-btn {
-            background: linear-gradient(135deg, #e53e3e, #c53030);
+        .sync-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
         }
         
         .empty-state {
@@ -607,10 +664,13 @@
     </style>
 </head>
 <body>
+    <div class="sync-indicator online" id="sync-indicator"></div>
+    
     <div class="container">
         <div class="header">
             <h1>装修费用计算器</h1>
             <div class="total-amount" id="grand-total">¥0</div>
+            <div class="sync-status" id="sync-status"></div>
         </div>
         
         <div class="category-tabs">
@@ -642,7 +702,7 @@
                         <input type="text" id="furniture-name" placeholder="请输入物品名称">
                     </div>
                     <div class="form-group">
-                        <input type="number" id="furniture-price" placeholder="单价" step="0.01">
+                        <input type="number" id="furniture-price" placeholder="单价">
                     </div>
                     <div class="form-group">
                         <div class="quantity-controls">
@@ -681,7 +741,7 @@
                         <input type="text" id="renovation-name" placeholder="请输入项目名称">
                     </div>
                     <div class="form-group">
-                        <input type="number" id="renovation-price" placeholder="单价" step="0.01">
+                        <input type="number" id="renovation-price" placeholder="单价">
                     </div>
                     <div class="form-group">
                         <div class="quantity-controls">
@@ -720,7 +780,7 @@
                         <input type="text" id="materials-name" placeholder="请输入项目名称">
                     </div>
                     <div class="form-group">
-                        <input type="number" id="materials-price" placeholder="单价" step="0.01">
+                        <input type="number" id="materials-price" placeholder="单价">
                     </div>
                     <div class="form-group">
                         <div class="quantity-controls">
@@ -761,7 +821,7 @@
                 <button class="export-btn excel-btn" onclick="exportToExcel()">导出Excel</button>
                 <button class="export-btn backup-btn" onclick="backupData()">备份数据</button>
                 <button class="export-btn import-btn" onclick="importData()">导入数据</button>
-                <button class="export-btn clear-btn" onclick="clearAllData()">清空数据</button>
+                <button class="export-btn sync-btn" onclick="showSyncCode()">同步设置</button>
             </div>
         </div>
     </div>
@@ -788,8 +848,8 @@
     <input type="file" id="import-file" accept=".json" class="hidden" onchange="handleFileImport(event)">
 
     <script>
-        // 默认初始数据
-        const defaultData = {
+        // 初始数据
+        let data = {
             furniture: [
                 { name: "羊毛被1.8*2", price: 230, quantity: 1 },
                 { name: "小米智能门铃", price: 484, quantity: 1 },
@@ -854,37 +914,292 @@
             ]
         };
 
-        // 数据存储键名
-        const STORAGE_KEY = 'renovationCalculatorData';
-        
-        // 从localStorage加载数据
-        function loadData() {
-            try {
-                const saved = localStorage.getItem(STORAGE_KEY);
-                if (saved) {
-                    return JSON.parse(saved);
-                }
-            } catch (e) {
-                console.error('加载数据失败:', e);
-            }
-            return JSON.parse(JSON.stringify(defaultData)); // 返回默认数据的深拷贝
-        }
-        
-        // 保存数据到localStorage
-        function saveData() {
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-            } catch (e) {
-                console.error('保存数据失败:', e);
-                showToast('数据保存失败，可能是存储空间不足');
-            }
-        }
-        
-        // 初始化数据
-        let data = loadData();
-
         let currentFilter = { furniture: 'all', renovation: 'all', materials: 'all' };
         let editingItem = null;
+
+        // 简化版同步管理器
+        class SimpleSyncManager {
+            constructor() {
+                this.roomId = this.getRoomId();
+                this.isConnected = false;
+                this.isSyncing = false;
+                this.pollInterval = null;
+                this.serverUrl = 'https://api.jsonbin.io/v3/b/';
+                this.binId = localStorage.getItem('binId') || null;
+                this.apiKey = null; // 用户需要自己设置
+                this.init();
+            }
+
+            getRoomId() {
+                let roomId = localStorage.getItem('renovationRoomId');
+                if (!roomId) {
+                    roomId = 'room_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+                    localStorage.setItem('renovationRoomId', roomId);
+                }
+                return roomId;
+            }
+
+            async init() {
+                this.updateSyncIndicator('offline');
+                this.showStatus('准备同步功能...');
+                
+                // 检查是否已配置API
+                if (!this.binId || !this.getApiKey()) {
+                    this.showStatus('需要配置同步服务', 'warning');
+                    return;
+                }
+
+                try {
+                    await this.testConnection();
+                    this.startPolling();
+                    this.showStatus('同步服务已连接');
+                    this.updateSyncIndicator('online');
+                } catch (error) {
+                    console.error('同步服务初始化失败:', error);
+                    this.showStatus('同步服务连接失败，使用离线模式', 'error');
+                    this.updateSyncIndicator('offline');
+                }
+
+                // 监听网络状态
+                window.addEventListener('online', () => this.handleOnline());
+                window.addEventListener('offline', () => this.handleOffline());
+            }
+
+            getApiKey() {
+                return localStorage.getItem('jsonbin_api_key');
+            }
+
+            setApiKey(key) {
+                localStorage.setItem('jsonbin_api_key', key);
+                this.apiKey = key;
+            }
+
+            async testConnection() {
+                if (!this.getApiKey() || !this.binId) {
+                    throw new Error('API配置不完整');
+                }
+
+                const response = await fetch(this.serverUrl + this.binId, {
+                    headers: {
+                        'X-Master-Key': this.getApiKey()
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('连接测试失败');
+                }
+
+                return true;
+            }
+
+            startPolling() {
+                if (this.pollInterval) {
+                    clearInterval(this.pollInterval);
+                }
+
+                this.pollInterval = setInterval(async () => {
+                    if (navigator.onLine && !this.isSyncing) {
+                        await this.checkForUpdates();
+                    }
+                }, 10000); // 每10秒检查一次
+            }
+
+            stopPolling() {
+                if (this.pollInterval) {
+                    clearInterval(this.pollInterval);
+                    this.pollInterval = null;
+                }
+            }
+
+            async checkForUpdates() {
+                if (!this.getApiKey() || !this.binId) return;
+
+                try {
+                    this.updateSyncIndicator('syncing');
+                    
+                    const response = await fetch(this.serverUrl + this.binId, {
+                        headers: {
+                            'X-Master-Key': this.getApiKey()
+                        }
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        const remoteData = result.record;
+                        
+                        if (remoteData && remoteData.roomId === this.roomId) {
+                            const localTimestamp = localStorage.getItem('lastSync') || '0';
+                            if (remoteData.timestamp > localTimestamp) {
+                                this.mergeData(remoteData.data);
+                                localStorage.setItem('lastSync', remoteData.timestamp);
+                                this.showStatus('数据已同步更新');
+                            }
+                        }
+                    }
+                    
+                    this.updateSyncIndicator('online');
+                } catch (error) {
+                    console.log('同步检查失败:', error);
+                    this.updateSyncIndicator('offline');
+                }
+            }
+
+            async uploadData() {
+                if (!navigator.onLine || !this.getApiKey() || !this.binId || this.isSyncing) {
+                    return;
+                }
+
+                try {
+                    this.isSyncing = true;
+                    this.updateSyncIndicator('syncing');
+
+                    const uploadData = {
+                        data: data,
+                        timestamp: Date.now().toString(),
+                        roomId: this.roomId,
+                        lastModified: new Date().toISOString()
+                    };
+
+                    const response = await fetch(this.serverUrl + this.binId, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Master-Key': this.getApiKey()
+                        },
+                        body: JSON.stringify(uploadData)
+                    });
+
+                    if (response.ok) {
+                        localStorage.setItem('lastSync', uploadData.timestamp);
+                        this.showStatus('数据已上传同步');
+                        this.updateSyncIndicator('online');
+                    } else {
+                        throw new Error('上传失败');
+                    }
+                } catch (error) {
+                    console.error('上传失败:', error);
+                    this.showStatus('数据上传失败', 'error');
+                    this.updateSyncIndicator('offline');
+                } finally {
+                    this.isSyncing = false;
+                }
+            }
+
+            mergeData(remoteData) {
+                try {
+                    data = remoteData;
+                    ['furniture', 'renovation', 'materials'].forEach(category => {
+                        renderItems(category);
+                    });
+                    updateTotals();
+                } catch (error) {
+                    console.error('数据合并失败:', error);
+                    this.showStatus('数据同步异常', 'error');
+                }
+            }
+
+            handleOnline() {
+                this.updateSyncIndicator('online');
+                this.showStatus('网络已连接');
+                if (this.getApiKey() && this.binId) {
+                    this.startPolling();
+                }
+            }
+
+            handleOffline() {
+                this.updateSyncIndicator('offline');
+                this.showStatus('离线模式', 'warning');
+                this.stopPolling();
+            }
+
+            updateSyncIndicator(status) {
+                const indicator = document.getElementById('sync-indicator');
+                if (indicator) {
+                    indicator.className = `sync-indicator ${status}`;
+                }
+            }
+
+            showStatus(message, type = 'success') {
+                const statusEl = document.getElementById('sync-status');
+                if (statusEl) {
+                    statusEl.textContent = message;
+                    statusEl.className = `sync-status ${type}`;
+                    setTimeout(() => {
+                        if (statusEl.textContent === message) {
+                            statusEl.textContent = '';
+                            statusEl.className = 'sync-status';
+                        }
+                    }, 5000);
+                }
+            }
+
+            getRoomCode() {
+                return this.roomId;
+            }
+
+            async setupSync(apiKey) {
+                try {
+                    this.setApiKey(apiKey);
+                    
+                    // 创建新的bin
+                    const createResponse = await fetch('https://api.jsonbin.io/v3/b', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Master-Key': apiKey
+                        },
+                        body: JSON.stringify({
+                            data: data,
+                            timestamp: Date.now().toString(),
+                            roomId: this.roomId,
+                            lastModified: new Date().toISOString()
+                        })
+                    });
+
+                    if (createResponse.ok) {
+                        const result = await createResponse.json();
+                        this.binId = result.metadata.id;
+                        localStorage.setItem('binId', this.binId);
+                        
+                        await this.init();
+                        this.showStatus('同步功能配置成功！');
+                        return true;
+                    } else {
+                        throw new Error('创建存储失败');
+                    }
+                } catch (error) {
+                    console.error('配置同步失败:', error);
+                    this.showStatus('同步配置失败：' + error.message, 'error');
+                    return false;
+                }
+            }
+
+            async joinRoom(roomId, apiKey) {
+                try {
+                    this.setApiKey(apiKey);
+                    
+                    // 搜索包含指定roomId的bin
+                    // 注意：这需要知道具体的binId，实际使用中可能需要其他方式分享
+                    this.showStatus('加入房间功能需要获取分享的存储ID', 'warning');
+                    return false;
+                } catch (error) {
+                    console.error('加入房间失败:', error);
+                    this.showStatus('加入房间失败：' + error.message, 'error');
+                    return false;
+                }
+            }
+        }
+
+        // 初始化同步管理器
+        const syncManager = new SimpleSyncManager();
+
+        // 保存原始函数
+        const originalFunctions = {
+            addItem: null,
+            deleteItem: null,
+            saveEdit: null,
+            changeItemQuantity: null
+        };
 
         function formatCurrency(amount) {
             return '¥' + amount.toLocaleString();
@@ -910,7 +1225,6 @@
             document.getElementById('grand-total').textContent = formatCurrency(grandTotal);
 
             updateStats();
-            saveData(); // 自动保存数据
         }
 
         function updateStats() {
@@ -1017,7 +1331,7 @@
             item.quantity = Math.max(1, item.quantity + delta);
             renderItems(category);
             updateTotals();
-            saveData(); // 保存更改
+            syncManager.uploadData();
         }
 
         function switchTab(category) {
@@ -1057,6 +1371,7 @@
             
             renderItems(category);
             updateTotals();
+            syncManager.uploadData();
             showToast('项目添加成功');
         }
 
@@ -1065,27 +1380,8 @@
                 data[category].splice(index, 1);
                 renderItems(category);
                 updateTotals();
-                saveData(); // 保存更改
+                syncManager.uploadData();
                 showToast('项目删除成功');
-            }
-        }
-
-        // 清空所有数据
-        function clearAllData() {
-            if (confirm('确定要清空所有数据吗？此操作不可恢复！')) {
-                if (confirm('再次确认：是否真的要清空所有数据？')) {
-                    data = {
-                        furniture: [],
-                        renovation: [],
-                        materials: []
-                    };
-                    saveData();
-                    ['furniture', 'renovation', 'materials'].forEach(category => {
-                        renderItems(category);
-                    });
-                    updateTotals();
-                    showToast('所有数据已清空');
-                }
             }
         }
 
@@ -1162,6 +1458,7 @@
             renderItems(category);
             updateTotals();
             closeEditModal();
+            syncManager.uploadData();
             showToast('项目修改成功');
         }
 
@@ -1170,6 +1467,70 @@
             toast.textContent = message;
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // 显示同步配置
+        function showSyncCode() {
+            const modal = document.createElement('div');
+            modal.className = 'modal show';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <div class="modal-title">同步设置</div>
+                        <button class="close-btn" onclick="this.parentElement.parentElement.parentElement.remove()">&times;</button>
+                    </div>
+                    <div class="modal-form">
+                        <p style="margin-bottom: 15px; color: #666; font-size: 14px;">
+                            要启用多设备同步，需要配置JSONBin API。<br>
+                            1. 访问 <a href="https://jsonbin.io" target="_blank">JSONBin.io</a> 注册免费账户<br>
+                            2. 获取 API Key 并输入下方<br>
+                            3. 分享房间代码给家人实现数据同步
+                        </p>
+                        <input type="text" id="api-key-input" placeholder="请输入 JSONBin API Key" style="margin-bottom: 15px;">
+                        <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                            <p style="margin-bottom: 10px; font-weight: bold;">房间代码：</p>
+                            <div style="font-family: monospace; font-size: 14px; word-break: break-all; background: white; padding: 10px; border-radius: 4px;">
+                                ${syncManager.getRoomCode()}
+                            </div>
+                        </div>
+                        <div class="modal-buttons">
+                            <button class="modal-btn secondary" onclick="this.closest('.modal').remove()">取消</button>
+                            <button class="modal-btn primary" onclick="setupSyncWithApi()">配置同步</button>
+                            <button class="modal-btn primary" onclick="copyRoomCode('${syncManager.getRoomCode()}')">复制房间代码</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            // 点击外部关闭
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+        }
+
+        function setupSyncWithApi() {
+            const apiKey = document.getElementById('api-key-input').value.trim();
+            if (!apiKey) {
+                showToast('请输入 API Key');
+                return;
+            }
+
+            syncManager.setupSync(apiKey).then(success => {
+                if (success) {
+                    document.querySelector('.modal.show').remove();
+                }
+            });
+        }
+
+        function copyRoomCode(code) {
+            navigator.clipboard.writeText(code).then(() => {
+                showToast('房间代码已复制到剪贴板');
+            }).catch(() => {
+                showToast('复制失败，请手动复制');
+            });
         }
 
         function exportData() {
@@ -1233,17 +1594,17 @@
                 
                 // 标题
                 doc.setFontSize(20);
-                doc.text('Renovation Cost Summary', 105, 20, { align: 'center' });
+                doc.text('装修费用汇总', 105, 20, { align: 'center' });
                 
                 // 生成日期
                 doc.setFontSize(10);
-                doc.text(`Date: ${new Date().toLocaleDateString()}`, 105, 30, { align: 'center' });
+                doc.text(`生成日期: ${new Date().toLocaleDateString()}`, 105, 30, { align: 'center' });
                 
                 let yPosition = 50;
                 const categories = {
-                    furniture: 'Furniture & Appliances',
-                    renovation: 'Renovation',
-                    materials: 'Materials & Labor'
+                    furniture: '家电家具类',
+                    renovation: '硬装相关',
+                    materials: '工装材料&工费'
                 };
                 
                 Object.keys(categories).forEach(category => {
@@ -1272,7 +1633,7 @@
                     // 小计
                     doc.setFont('helvetica', 'bold');
                     const subtotal = calculateTotal(category);
-                    doc.text(`Subtotal: ¥${subtotal.toLocaleString()}`, 25, yPosition);
+                    doc.text(`小计: ¥${subtotal.toLocaleString()}`, 25, yPosition);
                     yPosition += 15;
                     doc.setFont('helvetica', 'normal');
                 });
@@ -1285,10 +1646,10 @@
                 doc.setFontSize(16);
                 doc.setFont('helvetica', 'bold');
                 const grandTotal = calculateGrandTotal();
-                doc.text(`Grand Total: ¥${grandTotal.toLocaleString()}`, 105, yPosition, { align: 'center' });
+                doc.text(`总计: ¥${grandTotal.toLocaleString()}`, 105, yPosition, { align: 'center' });
                 
                 // 保存PDF
-                const fileName = `renovation_cost_${new Date().toISOString().split('T')[0]}.pdf`;
+                const fileName = `装修费用汇总_${new Date().toISOString().split('T')[0]}.pdf`;
                 doc.save(fileName);
                 showToast('PDF导出成功！');
                 
@@ -1301,7 +1662,7 @@
         function exportToExcel() {
             // 检查XLSX库是否已加载
             if (typeof XLSX === 'undefined') {
-                showToast('Excel功能加载中，请稍后再试');
+                showToast('Excel library not loaded, please refresh and try again');
                 return;
             }
 
@@ -1310,17 +1671,17 @@
                 const wb = XLSX.utils.book_new();
                 
                 const categories = {
-                    furniture: '家电家具',
-                    renovation: '硬装相关',
-                    materials: '工装材料'
+                    furniture: 'Furniture & Appliances',
+                    renovation: 'Renovation',
+                    materials: 'Materials & Labor'
                 };
                 
                 // 汇总数据
                 const summaryData = [
-                    ['装修费用汇总'],
-                    ['生成日期', new Date().toLocaleDateString()],
+                    ['Renovation Cost Summary'],
+                    ['Generated Date', new Date().toLocaleDateString()],
                     [''],
-                    ['类别', '项目名称', '单价', '数量', '小计']
+                    ['Category', 'Item Name', 'Unit Price', 'Quantity', 'Subtotal']
                 ];
                 
                 Object.keys(categories).forEach(category => {
@@ -1332,33 +1693,33 @@
                     });
                     
                     const subtotal = calculateTotal(category);
-                    summaryData.push(['', '小计', '', '', subtotal]);
+                    summaryData.push(['', 'Subtotal', '', '', subtotal]);
                     summaryData.push(['']);
                 });
                 
                 const grandTotal = calculateGrandTotal();
-                summaryData.push(['', '总计', '', '', grandTotal]);
+                summaryData.push(['', 'Grand Total', '', '', grandTotal]);
                 
                 // 创建汇总工作表
                 const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
                 
                 // 设置列宽
                 summaryWs['!cols'] = [
-                    { wch: 15 }, // 类别
-                    { wch: 30 }, // 项目名称
-                    { wch: 12 }, // 单价
-                    { wch: 10 }, // 数量
-                    { wch: 15 }  // 小计
+                    { wch: 15 }, // Category
+                    { wch: 30 }, // Item Name
+                    { wch: 12 }, // Unit Price
+                    { wch: 10 }, // Quantity
+                    { wch: 15 }  // Subtotal
                 ];
                 
-                XLSX.utils.book_append_sheet(wb, summaryWs, '汇总');
+                XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
                 
                 // 为每个类别创建单独的工作表
                 Object.keys(categories).forEach(category => {
                     const categoryData = [
                         [categories[category]],
                         [''],
-                        ['项目名称', '单价', '数量', '小计']
+                        ['Item Name', 'Unit Price', 'Quantity', 'Subtotal']
                     ];
                     
                     data[category].forEach(item => {
@@ -1368,29 +1729,29 @@
                     
                     const subtotal = calculateTotal(category);
                     categoryData.push(['']);
-                    categoryData.push(['总计', '', '', subtotal]);
+                    categoryData.push(['Total', '', '', subtotal]);
                     
                     const ws = XLSX.utils.aoa_to_sheet(categoryData);
                     
                     // 设置列宽
                     ws['!cols'] = [
-                        { wch: 30 }, // 项目名称
-                        { wch: 12 }, // 单价
-                        { wch: 10 }, // 数量
-                        { wch: 15 }  // 小计
+                        { wch: 30 }, // Item Name
+                        { wch: 12 }, // Unit Price
+                        { wch: 10 }, // Quantity
+                        { wch: 15 }  // Subtotal
                     ];
                     
-                    XLSX.utils.book_append_sheet(wb, ws, categories[category]);
+                    XLSX.utils.book_append_sheet(wb, ws, categories[category].substring(0, 30)); // 限制工作表名长度
                 });
                 
                 // 保存Excel文件
-                const fileName = `装修费用_${new Date().toISOString().split('T')[0]}.xlsx`;
+                const fileName = `renovation_cost_${new Date().toISOString().split('T')[0]}.xlsx`;
                 XLSX.writeFile(wb, fileName);
-                showToast('Excel导出成功！');
+                showToast('Excel exported successfully!');
                 
             } catch (error) {
-                console.error('Excel导出失败:', error);
-                showToast('Excel导出失败，请稍后再试');
+                console.error('Excel export error:', error);
+                showToast('Excel export failed: ' + error.message);
             }
         }
 
@@ -1435,11 +1796,11 @@
                             });
                         });
                         
-                        saveData(); // 保存导入的数据
                         ['furniture', 'renovation', 'materials'].forEach(category => {
                             renderItems(category);
                         });
                         updateTotals();
+                        syncManager.uploadData();
                         
                         showToast('数据导入成功！');
                     } else {
@@ -1467,7 +1828,7 @@
         document.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 const target = e.target;
-                if (target.id.includes('-name') || target.id.includes('-price') || target.id.includes('-quantity')) {
+                if (target.id.includes('-name') || target.id.includes('-price')) {
                     const category = target.id.split('-')[0];
                     addItem(category);
                 } else if (target.id === 'edit-name' || target.id === 'edit-price') {
