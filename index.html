@@ -1,0 +1,1503 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>装修费用计算器</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+        }
+        
+        .container {
+            max-width: 100%;
+            background: white;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .header h1 {
+            font-size: 1.8em;
+            margin-bottom: 10px;
+        }
+        
+        .total-amount {
+            font-size: 2.2em;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .category-tabs {
+            display: flex;
+            background: #f8f9fa;
+            overflow-x: auto;
+            padding: 0 10px;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        
+        .category-tabs::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .tab {
+            flex: 1;
+            min-width: 120px;
+            padding: 15px 10px;
+            text-align: center;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+        
+        .tab.active {
+            background: white;
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+        }
+        
+        .tab-content {
+            display: none;
+            padding: 20px;
+            min-height: 60vh;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .category-summary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .category-summary h3 {
+            font-size: 1.1em;
+            margin-bottom: 5px;
+            opacity: 0.9;
+        }
+        
+        .category-total {
+            font-size: 1.8em;
+            font-weight: bold;
+        }
+        
+        .search-box {
+            margin-bottom: 15px;
+        }
+        
+        .search-box input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        
+        .search-box input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .filters {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .filter-btn {
+            padding: 8px 15px;
+            border: 1px solid #e2e8f0;
+            background: white;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .filter-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+        
+        .add-form {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .form-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .form-group {
+            flex: 1;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            background: white;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .quantity-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .quantity-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            width: 35px;
+            height: 35px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .quantity-input {
+            width: 80px !important;
+            text-align: center;
+            padding: 10px !important;
+        }
+        
+        .add-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #48bb78, #38a169);
+            color: white;
+            border: none;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .add-btn:active {
+            transform: scale(0.98);
+        }
+        
+        .items-list {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        .item {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            overflow: hidden;
+            transition: all 0.2s;
+        }
+        
+        .item:active {
+            transform: scale(0.98);
+        }
+        
+        .item-content {
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .item-info {
+            flex: 1;
+            margin-right: 10px;
+        }
+        
+        .item-name {
+            font-weight: 500;
+            color: #2d3748;
+            margin-bottom: 5px;
+            word-break: break-all;
+            cursor: pointer;
+        }
+        
+        .item-name:hover {
+            color: #667eea;
+        }
+        
+        .item-details {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .item-price-section {
+            text-align: right;
+        }
+        
+        .item-price {
+            font-weight: bold;
+            color: #2b6cb0;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        
+        .item-price:hover {
+            color: #667eea;
+        }
+        
+        .item-total {
+            font-size: 12px;
+            color: #666;
+            margin-top: 2px;
+        }
+        
+        .item-actions {
+            background: #f8f9fa;
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .edit-quantity {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .edit-quantity button {
+            background: #667eea;
+            color: white;
+            border: none;
+            width: 25px;
+            height: 25px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .edit-quantity span {
+            min-width: 30px;
+            text-align: center;
+            font-size: 14px;
+        }
+        
+        .delete-btn, .edit-btn {
+            background: #e53e3e;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-size: 14px;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+        
+        .edit-btn {
+            background: #3182ce;
+        }
+        
+        .delete-btn:active {
+            background: #c53030;
+        }
+        
+        .edit-btn:active {
+            background: #2c5282;
+        }
+        
+        .stats-section {
+            background: #f8f9fa;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 10px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+        }
+        
+        .stat-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .export-section {
+            padding: 20px;
+            text-align: center;
+            background: #f8f9fa;
+            border-top: 1px solid #e2e8f0;
+        }
+        
+        .export-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .export-btn {
+            background: linear-gradient(135deg, #805ad5, #9f7aea);
+            color: white;
+            border: none;
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .export-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .backup-btn {
+            background: linear-gradient(135deg, #38a169, #48bb78);
+        }
+        
+        .import-btn {
+            background: linear-gradient(135deg, #3182ce, #4299e1);
+        }
+        
+        .pdf-btn {
+            background: linear-gradient(135deg, #e53e3e, #fc8181);
+        }
+        
+        .excel-btn {
+            background: linear-gradient(135deg, #38a169, #68d391);
+        }
+        
+        .clear-btn {
+            background: linear-gradient(135deg, #e53e3e, #c53030);
+        }
+        
+        .empty-state {
+            text-align: center;
+            color: #666;
+            padding: 40px 20px;
+        }
+        
+        .toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 6px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        .toast.show {
+            opacity: 1;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        /* 编辑模态框样式 */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+        }
+        
+        .modal.show {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            width: 90%;
+            max-width: 400px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .modal-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #2d3748;
+        }
+        
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .modal-form input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        
+        .modal-form input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        .modal-btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .modal-btn.primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .modal-btn.secondary {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+        
+        .modal-btn:active {
+            transform: scale(0.95);
+        }
+        
+        @media (max-width: 480px) {
+            .container {
+                border-radius: 0;
+            }
+            
+            body {
+                padding: 0;
+            }
+            
+            .total-amount {
+                font-size: 2em;
+            }
+            
+            .tab {
+                font-size: 12px;
+                padding: 12px 8px;
+            }
+            
+            .form-row {
+                flex-direction: column;
+            }
+            
+            .export-buttons {
+                flex-direction: column;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+            
+            .modal-content {
+                width: 95%;
+                margin: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>装修费用计算器</h1>
+            <div class="total-amount" id="grand-total">¥0</div>
+        </div>
+        
+        <div class="category-tabs">
+            <button class="tab active" onclick="switchTab('furniture')">家电家具</button>
+            <button class="tab" onclick="switchTab('renovation')">硬装相关</button>
+            <button class="tab" onclick="switchTab('materials')">工装材料</button>
+        </div>
+        
+        <div class="tab-content active" id="furniture-tab">
+            <div class="category-summary">
+                <h3>家电家具类</h3>
+                <div class="category-total" id="furniture-total">¥0</div>
+            </div>
+            
+            <div class="search-box">
+                <input type="text" id="furniture-search" placeholder="搜索项目..." oninput="searchItems('furniture')">
+            </div>
+            
+            <div class="filters">
+                <button class="filter-btn active" onclick="filterItems('furniture', 'all')">全部</button>
+                <button class="filter-btn" onclick="filterItems('furniture', 'high')">高价位</button>
+                <button class="filter-btn" onclick="filterItems('furniture', 'medium')">中价位</button>
+                <button class="filter-btn" onclick="filterItems('furniture', 'low')">低价位</button>
+            </div>
+            
+            <div class="add-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <input type="text" id="furniture-name" placeholder="请输入物品名称">
+                    </div>
+                    <div class="form-group">
+                        <input type="number" id="furniture-price" placeholder="单价" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <div class="quantity-controls">
+                            <button type="button" class="quantity-btn" onclick="changeQuantity('furniture', -1)">-</button>
+                            <input type="number" id="furniture-quantity" value="1" min="1" class="quantity-input">
+                            <button type="button" class="quantity-btn" onclick="changeQuantity('furniture', 1)">+</button>
+                        </div>
+                    </div>
+                </div>
+                <button class="add-btn" onclick="addItem('furniture')">添加项目</button>
+            </div>
+            
+            <div class="items-list" id="furniture-items"></div>
+        </div>
+        
+        <div class="tab-content" id="renovation-tab">
+            <div class="category-summary">
+                <h3>硬装相关</h3>
+                <div class="category-total" id="renovation-total">¥0</div>
+            </div>
+            
+            <div class="search-box">
+                <input type="text" id="renovation-search" placeholder="搜索项目..." oninput="searchItems('renovation')">
+            </div>
+            
+            <div class="filters">
+                <button class="filter-btn active" onclick="filterItems('renovation', 'all')">全部</button>
+                <button class="filter-btn" onclick="filterItems('renovation', 'high')">高价位</button>
+                <button class="filter-btn" onclick="filterItems('renovation', 'medium')">中价位</button>
+                <button class="filter-btn" onclick="filterItems('renovation', 'low')">低价位</button>
+            </div>
+            
+            <div class="add-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <input type="text" id="renovation-name" placeholder="请输入项目名称">
+                    </div>
+                    <div class="form-group">
+                        <input type="number" id="renovation-price" placeholder="单价" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <div class="quantity-controls">
+                            <button type="button" class="quantity-btn" onclick="changeQuantity('renovation', -1)">-</button>
+                            <input type="number" id="renovation-quantity" value="1" min="1" class="quantity-input">
+                            <button type="button" class="quantity-btn" onclick="changeQuantity('renovation', 1)">+</button>
+                        </div>
+                    </div>
+                </div>
+                <button class="add-btn" onclick="addItem('renovation')">添加项目</button>
+            </div>
+            
+            <div class="items-list" id="renovation-items"></div>
+        </div>
+        
+        <div class="tab-content" id="materials-tab">
+            <div class="category-summary">
+                <h3>工装材料&工费</h3>
+                <div class="category-total" id="materials-total">¥0</div>
+            </div>
+            
+            <div class="search-box">
+                <input type="text" id="materials-search" placeholder="搜索项目..." oninput="searchItems('materials')">
+            </div>
+            
+            <div class="filters">
+                <button class="filter-btn active" onclick="filterItems('materials', 'all')">全部</button>
+                <button class="filter-btn" onclick="filterItems('materials', 'high')">高价位</button>
+                <button class="filter-btn" onclick="filterItems('materials', 'medium')">中价位</button>
+                <button class="filter-btn" onclick="filterItems('materials', 'low')">低价位</button>
+            </div>
+            
+            <div class="add-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <input type="text" id="materials-name" placeholder="请输入项目名称">
+                    </div>
+                    <div class="form-group">
+                        <input type="number" id="materials-price" placeholder="单价" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <div class="quantity-controls">
+                            <button type="button" class="quantity-btn" onclick="changeQuantity('materials', -1)">-</button>
+                            <input type="number" id="materials-quantity" value="1" min="1" class="quantity-input">
+                            <button type="button" class="quantity-btn" onclick="changeQuantity('materials', 1)">+</button>
+                        </div>
+                    </div>
+                </div>
+                <button class="add-btn" onclick="addItem('materials')">添加项目</button>
+            </div>
+            
+            <div class="items-list" id="materials-items"></div>
+        </div>
+        
+        <div class="stats-section">
+            <h3 style="text-align: center; margin-bottom: 15px; color: #333;">装修统计</h3>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-value" id="total-items">0</div>
+                    <div class="stat-label">总项目数</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="avg-price">¥0</div>
+                    <div class="stat-label">平均单价</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="most-expensive">¥0</div>
+                    <div class="stat-label">最贵项目</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="export-section">
+            <div class="export-buttons">
+                <button class="export-btn" onclick="exportData()">导出文本</button>
+                <button class="export-btn pdf-btn" onclick="exportToPDF()">导出PDF</button>
+                <button class="export-btn excel-btn" onclick="exportToExcel()">导出Excel</button>
+                <button class="export-btn backup-btn" onclick="backupData()">备份数据</button>
+                <button class="export-btn import-btn" onclick="importData()">导入数据</button>
+                <button class="export-btn clear-btn" onclick="clearAllData()">清空数据</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 编辑模态框 -->
+    <div class="modal" id="edit-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">编辑项目</div>
+                <button class="close-btn" onclick="closeEditModal()">&times;</button>
+            </div>
+            <div class="modal-form">
+                <input type="text" id="edit-name" placeholder="项目名称">
+                <input type="number" id="edit-price" placeholder="单价" min="0" step="0.01">
+                <div class="modal-buttons">
+                    <button class="modal-btn secondary" onclick="closeEditModal()">取消</button>
+                    <button class="modal-btn primary" onclick="saveEdit()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="toast" id="toast"></div>
+    <input type="file" id="import-file" accept=".json" class="hidden" onchange="handleFileImport(event)">
+
+    <script>
+        // 默认初始数据
+        const defaultData = {
+            furniture: [
+                { name: "羊毛被1.8*2", price: 230, quantity: 1 },
+                { name: "小米智能门铃", price: 484, quantity: 1 },
+                { name: "小米零火开关", price: 148, quantity: 1 },
+                { name: "洗地机", price: 1636, quantity: 1 },
+                { name: "电动晾衣架", price: 530, quantity: 1 },
+                { name: "小米循环扇", price: 195, quantity: 1 },
+                { name: "小米智能猫眼", price: 360, quantity: 1 },
+                { name: "电视支架", price: 230, quantity: 1 },
+                { name: "水龙头（浴室两个）", price: 356, quantity: 1 },
+                { name: "风尊二代pro空调", price: 2150, quantity: 1 },
+                { name: "日丰花洒", price: 620, quantity: 1 },
+                { name: "小米电视", price: 3280, quantity: 1 },
+                { name: "台下水槽", price: 580, quantity: 1 },
+                { name: "卡萨帝烟灶", price: 1980, quantity: 1 },
+                { name: "美的冰箱&货拉拉运费", price: 808, quantity: 1 },
+                { name: "小米音箱&插线板", price: 205, quantity: 1 },
+                { name: "蒸烤机", price: 2690, quantity: 1 },
+                { name: "抽拉马桶", price: 1252, quantity: 1 },
+                { name: "小天鹅洗烘", price: 5000, quantity: 1 },
+                { name: "美的风管机", price: 3550, quantity: 1 },
+                { name: "洗碗机", price: 2730, quantity: 1 },
+                { name: "扫地机", price: 3699, quantity: 1 },
+                { name: "日丰厨房单槽", price: 500, quantity: 1 },
+                { name: "工业吸尘器", price: 133, quantity: 1 },
+                { name: "日丰智能马桶", price: 1104, quantity: 1 },
+                { name: "日丰水龙头", price: 200, quantity: 1 },
+                { name: "冰箱", price: 5800, quantity: 1 },
+                { name: "沙发", price: 6700, quantity: 1 },
+                { name: "全屋定制柜子", price: 48000, quantity: 1 }
+            ],
+            renovation: [
+                { name: "封窗", price: 17500, quantity: 1 },
+                { name: "微改", price: 22880, quantity: 1 },
+                { name: "门改色", price: 2900, quantity: 1 },
+                { name: "生活阳台加顶", price: 497, quantity: 1 },
+                { name: "踢脚线", price: 1496, quantity: 1 },
+                { name: "洗衣台定制", price: 1788, quantity: 1 },
+                { name: "阳台石定金", price: 500, quantity: 1 },
+                { name: "木地板", price: 14945, quantity: 1 }
+            ],
+            materials: [
+                { name: "风管机铜管", price: 360, quantity: 1 },
+                { name: "马桶安装", price: 100, quantity: 1 },
+                { name: "浴室柜门&合页", price: 290, quantity: 1 },
+                { name: "风管机预埋铜管&打孔", price: 1150, quantity: 1 },
+                { name: "电线", price: 28, quantity: 1 },
+                { name: "瓦克玻璃胶", price: 85, quantity: 1 },
+                { name: "厨房接气管", price: 180, quantity: 1 },
+                { name: "门槛石维修", price: 200, quantity: 1 },
+                { name: "厨房水槽安装费", price: 170, quantity: 1 },
+                { name: "灶具接软管", price: 160, quantity: 1 },
+                { name: "燃气保险", price: 200, quantity: 1 },
+                { name: "洗碗机安装", price: 66, quantity: 1 },
+                { name: "电视安装", price: 240, quantity: 1 },
+                { name: "电视加长电源线", price: 58, quantity: 1 },
+                { name: "电工加电位", price: 200, quantity: 1 },
+                { name: "购买电线", price: 70, quantity: 1 },
+                { name: "电灯安装", price: 40, quantity: 1 },
+                { name: "马桶花洒安装", price: 200, quantity: 1 },
+                { name: "空调高空费", price: 100, quantity: 1 }
+            ]
+        };
+
+        // 数据存储键名
+        const STORAGE_KEY = 'renovationCalculatorData';
+        
+        // 从localStorage加载数据
+        function loadData() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    return JSON.parse(saved);
+                }
+            } catch (e) {
+                console.error('加载数据失败:', e);
+            }
+            return JSON.parse(JSON.stringify(defaultData)); // 返回默认数据的深拷贝
+        }
+        
+        // 保存数据到localStorage
+        function saveData() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            } catch (e) {
+                console.error('保存数据失败:', e);
+                showToast('数据保存失败，可能是存储空间不足');
+            }
+        }
+        
+        // 初始化数据
+        let data = loadData();
+
+        let currentFilter = { furniture: 'all', renovation: 'all', materials: 'all' };
+        let editingItem = null;
+
+        function formatCurrency(amount) {
+            return '¥' + amount.toLocaleString();
+        }
+
+        function calculateTotal(category) {
+            return data[category].reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        }
+
+        function calculateGrandTotal() {
+            return calculateTotal('furniture') + calculateTotal('renovation') + calculateTotal('materials');
+        }
+
+        function updateTotals() {
+            const furnitureTotal = calculateTotal('furniture');
+            const renovationTotal = calculateTotal('renovation');
+            const materialsTotal = calculateTotal('materials');
+            const grandTotal = furnitureTotal + renovationTotal + materialsTotal;
+
+            document.getElementById('furniture-total').textContent = formatCurrency(furnitureTotal);
+            document.getElementById('renovation-total').textContent = formatCurrency(renovationTotal);
+            document.getElementById('materials-total').textContent = formatCurrency(materialsTotal);
+            document.getElementById('grand-total').textContent = formatCurrency(grandTotal);
+
+            updateStats();
+            saveData(); // 自动保存数据
+        }
+
+        function updateStats() {
+            const allItems = [...data.furniture, ...data.renovation, ...data.materials];
+            const totalItems = allItems.reduce((sum, item) => sum + item.quantity, 0);
+            const grandTotal = calculateGrandTotal();
+            
+            document.getElementById('total-items').textContent = totalItems;
+            document.getElementById('avg-price').textContent = totalItems > 0 ? formatCurrency(Math.round(grandTotal / totalItems)) : '¥0';
+            
+            const mostExpensive = Math.max(...allItems.map(item => item.price * item.quantity));
+            document.getElementById('most-expensive').textContent = formatCurrency(mostExpensive || 0);
+        }
+
+        function getPriceLevel(price) {
+            if (price >= 3000) return 'high';
+            if (price >= 500) return 'medium';
+            return 'low';
+        }
+
+        function filterItems(category, filter) {
+            currentFilter[category] = filter;
+            
+            // 更新按钮状态
+            const buttons = document.querySelectorAll(`#${category}-tab .filter-btn`);
+            buttons.forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            renderItems(category);
+        }
+
+        function searchItems(category) {
+            renderItems(category);
+        }
+
+        function getFilteredItems(category) {
+            let items = data[category];
+            
+            // 搜索过滤
+            const searchTerm = document.getElementById(`${category}-search`).value.toLowerCase();
+            if (searchTerm) {
+                items = items.filter(item => item.name.toLowerCase().includes(searchTerm));
+            }
+            
+            // 价格过滤
+            const filter = currentFilter[category];
+            if (filter !== 'all') {
+                items = items.filter(item => getPriceLevel(item.price * item.quantity) === filter);
+            }
+            
+            return items;
+        }
+
+        function renderItems(category) {
+            const container = document.getElementById(`${category}-items`);
+            const items = getFilteredItems(category);
+            container.innerHTML = '';
+
+            if (items.length === 0) {
+                container.innerHTML = '<div class="empty-state">没有找到匹配的项目</div>';
+                return;
+            }
+
+            items.forEach((item) => {
+                const actualIndex = data[category].indexOf(item);
+                const totalPrice = item.price * item.quantity;
+                
+                const itemElement = document.createElement('div');
+                itemElement.className = 'item';
+                itemElement.innerHTML = `
+                    <div class="item-content">
+                        <div class="item-info">
+                            <div class="item-name" onclick="editItemName('${category}', ${actualIndex})">${item.name}</div>
+                            <div class="item-details">数量: ${item.quantity}</div>
+                        </div>
+                        <div class="item-price-section">
+                            <div class="item-price" onclick="editItemPrice('${category}', ${actualIndex})">${formatCurrency(item.price)}</div>
+                            ${item.quantity > 1 ? `<div class="item-total">小计: ${formatCurrency(totalPrice)}</div>` : ''}
+                        </div>
+                    </div>
+                    <div class="item-actions">
+                        <div class="edit-quantity">
+                            <button onclick="changeItemQuantity('${category}', ${actualIndex}, -1)">-</button>
+                            <span>${item.quantity}</span>
+                            <button onclick="changeItemQuantity('${category}', ${actualIndex}, 1)">+</button>
+                        </div>
+                        <button class="edit-btn" onclick="editItem('${category}', ${actualIndex})">编辑</button>
+                        <button class="delete-btn" onclick="deleteItem('${category}', ${actualIndex})">删除</button>
+                    </div>
+                `;
+                container.appendChild(itemElement);
+            });
+        }
+
+        function changeQuantity(category, delta) {
+            const input = document.getElementById(`${category}-quantity`);
+            let value = parseInt(input.value) + delta;
+            if (value < 1) value = 1;
+            input.value = value;
+        }
+
+        function changeItemQuantity(category, index, delta) {
+            const item = data[category][index];
+            item.quantity = Math.max(1, item.quantity + delta);
+            renderItems(category);
+            updateTotals();
+            saveData(); // 保存更改
+        }
+
+        function switchTab(category) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(`${category}-tab`).classList.add('active');
+        }
+
+        function addItem(category) {
+            const nameInput = document.getElementById(`${category}-name`);
+            const priceInput = document.getElementById(`${category}-price`);
+            const quantityInput = document.getElementById(`${category}-quantity`);
+            
+            const name = nameInput.value.trim();
+            const price = parseFloat(priceInput.value);
+            const quantity = parseInt(quantityInput.value) || 1;
+
+            if (!name) {
+                showToast('请输入项目名称');
+                nameInput.focus();
+                return;
+            }
+
+            if (isNaN(price) || price <= 0) {
+                showToast('请输入有效的价格');
+                priceInput.focus();
+                return;
+            }
+
+            data[category].push({ name, price, quantity });
+            
+            nameInput.value = '';
+            priceInput.value = '';
+            quantityInput.value = '1';
+            
+            renderItems(category);
+            updateTotals();
+            showToast('项目添加成功');
+        }
+
+        function deleteItem(category, index) {
+            if (confirm('确定要删除这个项目吗？')) {
+                data[category].splice(index, 1);
+                renderItems(category);
+                updateTotals();
+                saveData(); // 保存更改
+                showToast('项目删除成功');
+            }
+        }
+
+        // 清空所有数据
+        function clearAllData() {
+            if (confirm('确定要清空所有数据吗？此操作不可恢复！')) {
+                if (confirm('再次确认：是否真的要清空所有数据？')) {
+                    data = {
+                        furniture: [],
+                        renovation: [],
+                        materials: []
+                    };
+                    saveData();
+                    ['furniture', 'renovation', 'materials'].forEach(category => {
+                        renderItems(category);
+                    });
+                    updateTotals();
+                    showToast('所有数据已清空');
+                }
+            }
+        }
+
+        // 编辑项目功能
+        function editItem(category, index) {
+            editingItem = { category, index };
+            const item = data[category][index];
+            
+            document.getElementById('edit-name').value = item.name;
+            document.getElementById('edit-price').value = item.price;
+            
+            showEditModal();
+        }
+
+        function editItemName(category, index) {
+            editingItem = { category, index };
+            const item = data[category][index];
+            
+            document.getElementById('edit-name').value = item.name;
+            document.getElementById('edit-price').value = item.price;
+            
+            showEditModal();
+            // 聚焦到名称输入框
+            setTimeout(() => {
+                document.getElementById('edit-name').focus();
+                document.getElementById('edit-name').select();
+            }, 100);
+        }
+
+        function editItemPrice(category, index) {
+            editingItem = { category, index };
+            const item = data[category][index];
+            
+            document.getElementById('edit-name').value = item.name;
+            document.getElementById('edit-price').value = item.price;
+            
+            showEditModal();
+            // 聚焦到价格输入框
+            setTimeout(() => {
+                document.getElementById('edit-price').focus();
+                document.getElementById('edit-price').select();
+            }, 100);
+        }
+
+        function showEditModal() {
+            document.getElementById('edit-modal').classList.add('show');
+        }
+
+        function closeEditModal() {
+            document.getElementById('edit-modal').classList.remove('show');
+            editingItem = null;
+        }
+
+        function saveEdit() {
+            if (!editingItem) return;
+            
+            const newName = document.getElementById('edit-name').value.trim();
+            const newPrice = parseFloat(document.getElementById('edit-price').value);
+            
+            if (!newName) {
+                showToast('请输入项目名称');
+                return;
+            }
+            
+            if (isNaN(newPrice) || newPrice <= 0) {
+                showToast('请输入有效的价格');
+                return;
+            }
+            
+            const { category, index } = editingItem;
+            data[category][index].name = newName;
+            data[category][index].price = newPrice;
+            
+            renderItems(category);
+            updateTotals();
+            closeEditModal();
+            showToast('项目修改成功');
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function exportData() {
+            let exportText = '装修费用汇总\n\n';
+            
+            const categories = {
+                furniture: '家电家具类',
+                renovation: '硬装相关',
+                materials: '工装材料&工费'
+            };
+            
+            Object.keys(categories).forEach(category => {
+                exportText += `${categories[category]}:\n`;
+                data[category].forEach(item => {
+                    const total = item.price * item.quantity;
+                    exportText += `${item.name}: ${formatCurrency(item.price)} × ${item.quantity} = ${formatCurrency(total)}\n`;
+                });
+                exportText += `小计: ${formatCurrency(calculateTotal(category))}\n\n`;
+            });
+
+            const grandTotal = calculateGrandTotal();
+            exportText += `总计: ${formatCurrency(grandTotal)}`;
+
+            if (navigator.share) {
+                navigator.share({
+                    title: '装修费用汇总',
+                    text: exportText
+                });
+            } else {
+                navigator.clipboard.writeText(exportText).then(() => {
+                    showToast('数据已复制到剪贴板！');
+                }).catch(() => {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = exportText;
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    try {
+                        document.execCommand('copy');
+                        showToast('数据已复制到剪贴板！');
+                    } catch (err) {
+                        showToast('复制失败，请手动复制');
+                        console.log(exportText);
+                    }
+                    document.body.removeChild(textarea);
+                });
+            }
+        }
+
+        function exportToPDF() {
+            if (typeof window.jsPDF === 'undefined') {
+                showToast('PDF功能加载中，请稍后再试');
+                return;
+            }
+
+            try {
+                const { jsPDF } = window.jsPDF;
+                const doc = new jsPDF();
+                
+                // 设置字体（支持中文）
+                doc.setFont('helvetica');
+                
+                // 标题
+                doc.setFontSize(20);
+                doc.text('Renovation Cost Summary', 105, 20, { align: 'center' });
+                
+                // 生成日期
+                doc.setFontSize(10);
+                doc.text(`Date: ${new Date().toLocaleDateString()}`, 105, 30, { align: 'center' });
+                
+                let yPosition = 50;
+                const categories = {
+                    furniture: 'Furniture & Appliances',
+                    renovation: 'Renovation',
+                    materials: 'Materials & Labor'
+                };
+                
+                Object.keys(categories).forEach(category => {
+                    // 类别标题
+                    doc.setFontSize(14);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text(categories[category], 20, yPosition);
+                    yPosition += 10;
+                    
+                    // 项目列表
+                    doc.setFontSize(10);
+                    doc.setFont('helvetica', 'normal');
+                    
+                    data[category].forEach(item => {
+                        if (yPosition > 270) {
+                            doc.addPage();
+                            yPosition = 20;
+                        }
+                        
+                        const total = item.price * item.quantity;
+                        const text = `${item.name}: ¥${item.price.toLocaleString()} × ${item.quantity} = ¥${total.toLocaleString()}`;
+                        doc.text(text, 25, yPosition);
+                        yPosition += 6;
+                    });
+                    
+                    // 小计
+                    doc.setFont('helvetica', 'bold');
+                    const subtotal = calculateTotal(category);
+                    doc.text(`Subtotal: ¥${subtotal.toLocaleString()}`, 25, yPosition);
+                    yPosition += 15;
+                    doc.setFont('helvetica', 'normal');
+                });
+                
+                // 总计
+                if (yPosition > 260) {
+                    doc.addPage();
+                    yPosition = 20;
+                }
+                doc.setFontSize(16);
+                doc.setFont('helvetica', 'bold');
+                const grandTotal = calculateGrandTotal();
+                doc.text(`Grand Total: ¥${grandTotal.toLocaleString()}`, 105, yPosition, { align: 'center' });
+                
+                // 保存PDF
+                const fileName = `renovation_cost_${new Date().toISOString().split('T')[0]}.pdf`;
+                doc.save(fileName);
+                showToast('PDF导出成功！');
+                
+            } catch (error) {
+                console.error('PDF导出失败:', error);
+                showToast('PDF导出失败，请稍后再试');
+            }
+        }
+
+        function exportToExcel() {
+            // 检查XLSX库是否已加载
+            if (typeof XLSX === 'undefined') {
+                showToast('Excel功能加载中，请稍后再试');
+                return;
+            }
+
+            try {
+                // 创建工作簿
+                const wb = XLSX.utils.book_new();
+                
+                const categories = {
+                    furniture: '家电家具',
+                    renovation: '硬装相关',
+                    materials: '工装材料'
+                };
+                
+                // 汇总数据
+                const summaryData = [
+                    ['装修费用汇总'],
+                    ['生成日期', new Date().toLocaleDateString()],
+                    [''],
+                    ['类别', '项目名称', '单价', '数量', '小计']
+                ];
+                
+                Object.keys(categories).forEach(category => {
+                    summaryData.push([categories[category], '', '', '', '']);
+                    
+                    data[category].forEach(item => {
+                        const total = item.price * item.quantity;
+                        summaryData.push(['', item.name, item.price, item.quantity, total]);
+                    });
+                    
+                    const subtotal = calculateTotal(category);
+                    summaryData.push(['', '小计', '', '', subtotal]);
+                    summaryData.push(['']);
+                });
+                
+                const grandTotal = calculateGrandTotal();
+                summaryData.push(['', '总计', '', '', grandTotal]);
+                
+                // 创建汇总工作表
+                const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
+                
+                // 设置列宽
+                summaryWs['!cols'] = [
+                    { wch: 15 }, // 类别
+                    { wch: 30 }, // 项目名称
+                    { wch: 12 }, // 单价
+                    { wch: 10 }, // 数量
+                    { wch: 15 }  // 小计
+                ];
+                
+                XLSX.utils.book_append_sheet(wb, summaryWs, '汇总');
+                
+                // 为每个类别创建单独的工作表
+                Object.keys(categories).forEach(category => {
+                    const categoryData = [
+                        [categories[category]],
+                        [''],
+                        ['项目名称', '单价', '数量', '小计']
+                    ];
+                    
+                    data[category].forEach(item => {
+                        const total = item.price * item.quantity;
+                        categoryData.push([item.name, item.price, item.quantity, total]);
+                    });
+                    
+                    const subtotal = calculateTotal(category);
+                    categoryData.push(['']);
+                    categoryData.push(['总计', '', '', subtotal]);
+                    
+                    const ws = XLSX.utils.aoa_to_sheet(categoryData);
+                    
+                    // 设置列宽
+                    ws['!cols'] = [
+                        { wch: 30 }, // 项目名称
+                        { wch: 12 }, // 单价
+                        { wch: 10 }, // 数量
+                        { wch: 15 }  // 小计
+                    ];
+                    
+                    XLSX.utils.book_append_sheet(wb, ws, categories[category]);
+                });
+                
+                // 保存Excel文件
+                const fileName = `装修费用_${new Date().toISOString().split('T')[0]}.xlsx`;
+                XLSX.writeFile(wb, fileName);
+                showToast('Excel导出成功！');
+                
+            } catch (error) {
+                console.error('Excel导出失败:', error);
+                showToast('Excel导出失败，请稍后再试');
+            }
+        }
+
+        function backupData() {
+            const backupData = {
+                data: data,
+                timestamp: new Date().toISOString(),
+                version: '2.0'
+            };
+            
+            const dataStr = JSON.stringify(backupData, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(dataBlob);
+            link.download = `装修预算备份_${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            
+            showToast('备份文件已下载');
+        }
+
+        function importData() {
+            document.getElementById('import-file').click();
+        }
+
+        function handleFileImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    
+                    if (importedData.data) {
+                        data = importedData.data;
+                        
+                        // 确保所有项目都有数量属性
+                        Object.keys(data).forEach(category => {
+                            data[category].forEach(item => {
+                                if (!item.quantity) item.quantity = 1;
+                            });
+                        });
+                        
+                        saveData(); // 保存导入的数据
+                        ['furniture', 'renovation', 'materials'].forEach(category => {
+                            renderItems(category);
+                        });
+                        updateTotals();
+                        
+                        showToast('数据导入成功！');
+                    } else {
+                        showToast('导入文件格式不正确');
+                    }
+                } catch (error) {
+                    showToast('导入失败：文件格式错误');
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        // 初始化
+        ['furniture', 'renovation', 'materials'].forEach(category => {
+            // 确保所有现有项目都有数量属性
+            data[category].forEach(item => {
+                if (!item.quantity) item.quantity = 1;
+            });
+            renderItems(category);
+        });
+        updateTotals();
+
+        // 添加回车键支持
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                const target = e.target;
+                if (target.id.includes('-name') || target.id.includes('-price') || target.id.includes('-quantity')) {
+                    const category = target.id.split('-')[0];
+                    addItem(category);
+                } else if (target.id === 'edit-name' || target.id === 'edit-price') {
+                    saveEdit();
+                }
+            }
+        });
+
+        // 模态框点击外部关闭
+        document.getElementById('edit-modal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeEditModal();
+            }
+        });
+
+        // 防止页面缩放
+        document.addEventListener('touchstart', function(event) {
+            if (event.touches.length > 1) {
+                event.preventDefault();
+            }
+        });
+
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', function(event) {
+            const now = (new Date()).getTime();
+            if (now - lastTouchEnd <= 300) {
+                event.preventDefault();
+            }
+            lastTouchEnd = now;
+        }, false);
+    </script>
+</body>
+</html>
