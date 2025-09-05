@@ -1504,8 +1504,10 @@
             setTimeout(() => toast.classList.remove('show'), 3000);
         }
 
-        // 显示GitHub同步配置
+        // 显示GitHub同步配置 - 最新版本
         function showSyncCode() {
+            const isConfigured = localStorage.getItem('github_token') && localStorage.getItem('gistId');
+            
             const modal = document.createElement('div');
             modal.className = 'modal show';
             modal.innerHTML = `
@@ -1515,29 +1517,65 @@
                         <button class="close-btn" onclick="this.parentElement.parentElement.parentElement.remove()">&times;</button>
                     </div>
                     <div class="modal-form">
-                        <p style="margin-bottom: 15px; color: #666; font-size: 14px;">
-                            要启用多设备同步，需要配置GitHub Personal Access Token。<br>
-                            1. 访问 <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings</a><br>
-                            2. 点击"Generate new token (classic)"<br>
-                            3. 勾选"gist"权限并生成token<br>
-                            4. 将token输入下方
-                        </p>
-                        <input type="password" id="github-token-input" placeholder="请输入 GitHub Personal Access Token" style="margin-bottom: 15px;">
-                        <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                            <p style="margin-bottom: 10px; font-weight: bold;">房间代码：</p>
-                            <div style="font-family: monospace; font-size: 14px; word-break: break-all; background: white; padding: 10px; border-radius: 4px;">
-                                ${syncManager.getRoomCode()}
+                        ${isConfigured ? `
+                            <div style="background: #e6ffe6; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                                <p style="color: #006600; font-weight: bold; margin-bottom: 10px;">✓ 同步已配置</p>
+                                <p style="color: #666; font-size: 14px;">房间代码：</p>
+                                <div style="font-family: monospace; font-size: 14px; word-break: break-all; background: white; padding: 10px; border-radius: 4px; margin: 5px 0;">
+                                    ${syncManager.getRoomCode()}
+                                </div>
+                                <button class="modal-btn primary" onclick="copyRoomCode('${syncManager.getRoomCode()}')" style="margin-top: 10px;">复制房间代码</button>
                             </div>
-                        </div>
-                        <div class="modal-buttons">
-                            <button class="modal-btn secondary" onclick="this.closest('.modal').remove()">取消</button>
-                            <button class="modal-btn primary" onclick="setupGitHubSync()">配置同步</button>
-                            <button class="modal-btn primary" onclick="copyRoomCode('${syncManager.getRoomCode()}')">复制房间代码</button>
-                        </div>
+                            <div style="border-top: 1px solid #ddd; padding-top: 15px;">
+                                <p style="color: #666; font-size: 14px; margin-bottom: 10px;">其他设备加入此房间：</p>
+                                <input type="text" id="join-room-code" placeholder="输入房间代码" style="margin-bottom: 10px;">
+                                <input type="password" id="join-token" placeholder="输入 GitHub Token" style="margin-bottom: 15px;">
+                                <button class="modal-btn primary" onclick="joinExistingRoom()">加入房间</button>
+                            </div>
+                        ` : `
+                            <p style="margin-bottom: 15px; color: #666; font-size: 14px;">
+                                要启用多设备同步，需要配置GitHub Personal Access Token。<br>
+                                1. 访问 <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings</a><br>
+                                2. 点击"Generate new token (classic)"<br>
+                                3. 勾选"gist"权限并生成token<br>
+                                4. 将token输入下方
+                            </p>
+                            <input type="password" id="github-token-input" placeholder="请输入 GitHub Personal Access Token" style="margin-bottom: 15px;">
+                            
+                            <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                                <p style="margin-bottom: 10px; font-weight: bold;">选择配置方式：</p>
+                                <label style="display: block; margin-bottom: 10px;">
+                                    <input type="radio" name="setup-mode" value="new" checked style="margin-right: 8px;">
+                                    创建新房间
+                                </label>
+                                <label style="display: block; margin-bottom: 10px;">
+                                    <input type="radio" name="setup-mode" value="join" style="margin-right: 8px;">
+                                    加入现有房间
+                                </label>
+                                <input type="text" id="existing-room-code" placeholder="房间代码（如果加入现有房间）" style="margin-top: 10px; display: none;">
+                            </div>
+                            
+                            <div class="modal-buttons">
+                                <button class="modal-btn secondary" onclick="this.closest('.modal').remove()">取消</button>
+                                <button class="modal-btn primary" onclick="setupGitHubSync()">配置同步</button>
+                            </div>
+                        `}
                     </div>
                 </div>
             `;
             document.body.appendChild(modal);
+
+            // 监听单选按钮变化
+            const radios = modal.querySelectorAll('input[name="setup-mode"]');
+            const roomCodeInput = modal.querySelector('#existing-room-code');
+            
+            radios.forEach(radio => {
+                radio.addEventListener('change', () => {
+                    if (roomCodeInput) {
+                        roomCodeInput.style.display = radio.value === 'join' ? 'block' : 'none';
+                    }
+                });
+            });
 
             // 点击外部关闭
             modal.addEventListener('click', (e) => {
